@@ -6,76 +6,88 @@ const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const Message = require("./models/Message");
 
+
 dotenv.config();
 connectDB();
+
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
-// ✅ Health check route for testing MongoDB with Postman
-app.post("/test/add", async (req, res) => {
-  try {
-    const msg = await Message.create({
-      username: "Postman",
-      text: "Hello from Postman!",
-    });
-    res.json(msg);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ Route to fetch all messages for testing
-app.get("/test/all", async (req, res) => {
-  try {
-    const messages = await Message.find().sort({ createdAt: -1 });
-    res.json(messages);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 const server = http.createServer(app);
-
 const io = new Server(server, {
-  cors: {
-    origin: "https://melodious-dango-453826.netlify.app", // ✅ your deployed frontend
-    methods: ["GET", "POST"],
-  },
+ cors: {
+   origin: "https://chatappfe.netlify.app/", // ✅ Replace with your actual Netlify link
+   methods: ["GET", "POST"],
+ },
 });
+
 
 const users = {};
 
-io.on("connection", (socket) => {
-  console.log("🟢 Connected:", socket.id);
 
-  socket.on("user-joined", (username) => {
-    users[socket.id] = username;
-    socket.broadcast.emit("user-joined", username);
-  });
+io.on("connection", async (socket) => {
+ console.log("🟢 Connected:", socket.id);
 
-  socket.on("send-message", async (data) => {
-    try {
-      await Message.create(data); // ✅ Save message to DB
-      io.emit("chat-message", data);
-    } catch (err) {
-      console.error("❌ Error saving message:", err.message);
-    }
-  });
 
-  socket.on("typing", (username) => {
-    socket.broadcast.emit("typing", username);
-  });
+ // 🧠 Send previous messages to newly connected client
+ try {
+   const previousMessages = await Message.find().sort({ createdAt: 1 }).limit(50);
+   socket.emit("previous-messages", previousMessages);
+ } catch (error) {
+   console.error("Error loading messages:", error);
+ }
 
-  socket.on("disconnect", () => {
-    const username = users[socket.id];
-    if (username) {
-      socket.broadcast.emit("user-left", username);
-      delete users[socket.id];
-    }
-  });
+
+ // 🧠 When a user joins
+ socket.on("user-joined", (username) => {
+   users[socket.id] = username;
+   console.log(`👤 ${username} joined`);
+   socket.broadcast.emit("user-joined", username);
+ });
+
+
+ // 🧠 When a user sends a message
+ socket.on("send-message", async (data) => {
+   const { username, text } = data;
+
+
+   try {
+     const message = new Message({ username, text });
+     await message.save(); // 💾 save message to MongoDB
+
+
+     io.emit("chat-message", data); // broadcast to all
+   } catch (error) {
+     console.error("Error saving message:", error);
+   }
+ });
+
+
+ // 🧠 Typing indicator
+ socket.on("typing", (username) => {
+   socket.broadcast.emit("typing", username);
+ });
+
+
+ // 🧠 Disconnect
+ socket.on("disconnect", () => {
+   const username = users[socket.id];
+   if (username) {
+     console.log(`🔴 ${username} left`);
+     socket.broadcast.emit("user-left", username);
+     delete users[socket.id];
+   }
+ });
 });
+
+
+app.get("/", (req, res) => {
+ res.send("✅ ChatApp Backend is running successfully!");
+});
+
 
 const PORT = process.env.PORT || 5001;
 server.listen(PORT, () => console.log(`⚡ Server running on port ${PORT}`));
