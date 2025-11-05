@@ -4,50 +4,44 @@ const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
+const Message = require("./models/Message");
 
 dotenv.config();
 connectDB();
 
 const app = express();
 app.use(express.json());
+app.use(cors());
 
-// ✅ Allow both localhost and deployed frontend (add your Netlify URL later)
-const allowedOrigins = [
-  "http://localhost:3000",
-  // "https://your-frontend.netlify.app",  // add this once deployed
-];
+// ✅ Health check route for testing MongoDB with Postman
+app.post("/test/add", async (req, res) => {
+  try {
+    const msg = await Message.create({
+      username: "Postman",
+      text: "Hello from Postman!",
+    });
+    res.json(msg);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-// ✅ CORS setup
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (!allowedOrigins.includes(origin)) {
-        return callback(
-          new Error(`Origin ${origin} not allowed by CORS policy`),
-          false
-        );
-      }
-      return callback(null, true);
-    },
-    methods: ["GET", "POST"],
-    credentials: true,
-  })
-);
-
-// ✅ Root route for Render check
-app.get("/", (req, res) => {
-  res.send("🚀 ChatApp backend is running!");
+// ✅ Route to fetch all messages for testing
+app.get("/test/all", async (req, res) => {
+  try {
+    const messages = await Message.find().sort({ createdAt: -1 });
+    res.json(messages);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const server = http.createServer(app);
 
-// ✅ Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: "https://melodious-dango-453826.netlify.app", // ✅ your deployed frontend
     methods: ["GET", "POST"],
-    credentials: true,
   },
 });
 
@@ -56,28 +50,27 @@ const users = {};
 io.on("connection", (socket) => {
   console.log("🟢 Connected:", socket.id);
 
-  // ✅ When a user joins
   socket.on("user-joined", (username) => {
     users[socket.id] = username;
-    console.log(`👤 ${username} joined`);
     socket.broadcast.emit("user-joined", username);
   });
 
-  // ✅ When a message is sent
-  socket.on("send-message", (data) => {
-    io.emit("chat-message", data); // send to everyone including sender
+  socket.on("send-message", async (data) => {
+    try {
+      await Message.create(data); // ✅ Save message to DB
+      io.emit("chat-message", data);
+    } catch (err) {
+      console.error("❌ Error saving message:", err.message);
+    }
   });
 
-  // ✅ When someone is typing
   socket.on("typing", (username) => {
-    socket.broadcast.emit("typing", username); // everyone except typer
+    socket.broadcast.emit("typing", username);
   });
 
-  // ✅ When a user disconnects
   socket.on("disconnect", () => {
     const username = users[socket.id];
     if (username) {
-      console.log(`🔴 ${username} left`);
       socket.broadcast.emit("user-left", username);
       delete users[socket.id];
     }
