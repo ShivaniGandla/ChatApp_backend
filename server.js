@@ -13,16 +13,11 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Health check route
-app.get("/", (req, res) => {
-  res.send("✅ ChatApp Backend is running successfully!");
-});
-
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "https://chatappfe.netlify.app", // Replace with your actual frontend URL
+    origin: "https://chatappfe.netlify.app", // Replace with your actual frontend link
     methods: ["GET", "POST"],
   },
 });
@@ -32,27 +27,28 @@ const users = {};
 io.on("connection", async (socket) => {
   console.log("🟢 Connected:", socket.id);
 
-  // Send all previous messages to the connected client
+  // Send previous messages to new user
   try {
-    const previousMessages = await Message.find().sort({ createdAt: 1 }); // chronological order
+    const previousMessages = await Message.find().sort({ createdAt: 1 }).limit(50);
     socket.emit("previous-messages", previousMessages);
   } catch (error) {
-    console.error("Error fetching messages:", error);
+    console.error("Error loading messages:", error);
   }
 
-  // When a user joins
+  // User joins
   socket.on("user-joined", (username) => {
     users[socket.id] = username;
     console.log(`👤 ${username} joined`);
     socket.broadcast.emit("user-joined", username);
   });
 
-  // When a user sends a message
+  // User sends message
   socket.on("send-message", async (data) => {
+    const { username, text } = data;
     try {
-      const message = new Message({ username: data.username, text: data.text });
-      await message.save(); // Save to MongoDB
-      io.emit("chat-message", data); // Broadcast to all
+      const message = new Message({ username, text });
+      await message.save();
+      io.emit("chat-message", data);
     } catch (error) {
       console.error("Error saving message:", error);
     }
@@ -63,7 +59,7 @@ io.on("connection", async (socket) => {
     socket.broadcast.emit("typing", username);
   });
 
-  // Disconnect
+  // User disconnects
   socket.on("disconnect", () => {
     const username = users[socket.id];
     if (username) {
@@ -72,6 +68,11 @@ io.on("connection", async (socket) => {
       delete users[socket.id];
     }
   });
+});
+
+// Health check route
+app.get("/", (req, res) => {
+  res.send("✅ ChatApp Backend is running successfully!");
 });
 
 const PORT = process.env.PORT || 5001;
